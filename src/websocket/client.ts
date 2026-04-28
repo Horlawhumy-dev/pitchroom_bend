@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
-import AnthropicClient from "./anthropic";
+import GeminiClient from "./gemini";
 import url from "url";
 import { IncomingMessage } from "http";
 import logger from "../utils/logger";
@@ -9,8 +9,7 @@ import SessionObjType, {
   RequestEnum,
   SessionReportInterface,
 } from "../utils/interface";
-import { extractUserQuestionFromAudio } from "../utils/extractQuestion";
-import { returnTextFromAudioBuffer, isWebMHeader } from "../utils/transcribe";
+import { WhisperTranscriber } from "../utils/whisperTranscribe";
 import saveOrUpdatePitchIntelligenceReport from "../repositories/savePitchReportTranscript";
 import { generateTTS } from "../utils/tts";
 
@@ -42,7 +41,7 @@ import { generateTTS } from "../utils/tts";
 const MAX_INACTIVITY_TIME = 3000;
 
 export default async function setupWebSocketServer(wss: WebSocketServer) {
-  let anthropicClient: AnthropicClient;
+  let geminiClient: GeminiClient;
 
   wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
     const parsedUrl = url.parse(req.url || "", true);
@@ -87,13 +86,13 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
     }
 
     logger.info(`WebSocket connected for user ${sessionObj.userData?.uid}`);
-    anthropicClient = new AnthropicClient();
+    geminiClient = new GeminiClient();
 
     // PERSONALIZED WELCOME SEQUENCE:
     // This greets the founder based on their pitch profile immediately upon connection.
     (async () => {
       try {
-        const welcomeText = await anthropicClient.generateWelcomeMessage(sessionObj);
+        const welcomeText = await geminiClient.generateWelcomeMessage(sessionObj);
         const audioBase64 = await generateTTS(welcomeText);
         if (audioBase64 && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
@@ -109,8 +108,29 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
       }
     })();
 
-    let currentAudioBuffer = Buffer.from([]);
-    let inactivityTimer: NodeJS.Timeout | null = null;
+    // Accumulates final transcript segments within one utterance
+    let transcriptBuffer = "";
+
+    // Whisper local transcription — one connection per WebSocket session
+    const whisperTranscriber = new WhisperTranscriber(async ({ text, is_final }) => {
+      if (!text && is_final) {
+        // UtteranceEnd boundary: flush accumulated buffer as the completed question
+        const finalQuestion = transcriptBuffer.trim();
+        transcriptBuffer = "";
+        if (finalQuestion && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ error: "", transcript: finalQuestion, transcriptDone: true }));
+        }
+        return;
+      }
+
+      if (text && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ error: "", transcript: text, transcriptDone: false }));
+      }
+
+      if (text && is_final) {
+        transcriptBuffer += (transcriptBuffer ? " " : "") + text;
+      }
+    });
 
     ws.on("message", async (message: any) => {
       let questionBuffer: any;
@@ -122,11 +142,6 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
         return;
       }
 
-      // Important: Clear the inactivity timer on EVERY message
-      // This prevents the buffer from being cleared prematurely if messages are arriving.
-      if (inactivityTimer) {
-        clearTimeout(inactivityTimer);
-      }
 
       let buffer = null;
       let actionType: RequestEnum =
@@ -174,40 +189,10 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
 
         logger.debug(`Received audio chunk: ${chunk.length} bytes`);
 
-        // AUTO-RESTART DETECTION:
-        // If the chunk starts with a WebM header, it means a new recording session has started.
-        // We clear the buffer to ensure the new session starts fresh and doesn't get wiped by stale timers.
-        if (isWebMHeader(chunk)) {
-          if (currentAudioBuffer.length > 0) {
-            logger.info(`[Session ${sessionId}] New WebM stream detected. Resetting audio buffer.`);
-            currentAudioBuffer = Buffer.from([]);
-          }
-        }
-
-        const transcriptionResult = await extractUserQuestionFromAudio(
-          chunk,
-          currentAudioBuffer,
-          sessionId,
-        );
-
-        if (transcriptionResult) {
-          transcribedQuestion = transcriptionResult.text;
-          currentAudioBuffer = transcriptionResult.updatedBuffer;
-        }
-
-        if (!transcribedQuestion) {
-          // If no transcription yet (e.g. buffer too small), just return and wait for more chunks
-          return;
-        }
-
-        logger.debug(`Live Transcript: ${transcribedQuestion}`);
-        ws.send(
-          JSON.stringify({
-            error: "",
-            transcript: transcribedQuestion,
-            transcriptDone: false,
-          }),
-        );
+        // Forward the raw audio chunk directly to Whisper's live WebSocket.
+        // Interim and final transcripts are emitted via the WhisperTranscriber callback above.
+        whisperTranscriber.sendAudioChunk(chunk);
+        return;
       } else {
         transcribedQuestion = questionBuffer["text"];
         if (!transcribedQuestion) {
@@ -224,7 +209,7 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
 
         // action type is answer, then send the transcribed question to Anthropic
         try {
-          const finalAnswer = await anthropicClient.sendMessageWithStream(
+          const finalAnswer = await geminiClient.sendMessageWithStream(
             transcribedQuestion,
             sessionObj,
             (streamedData: any) => {
@@ -272,34 +257,13 @@ export default async function setupWebSocketServer(wss: WebSocketServer) {
         }
       }
 
-      inactivityTimer = setTimeout(async () => {
-        // Timeout triggered, indicating no more audio buffers are coming
-        logger.debug(
-          `No more audio buffers received for session ${sessionId}. Assuming the client is done.`,
-        );
-
-        if (currentAudioBuffer.length > 0) {
-          let finalTranscription = "";
-          try {
-            finalTranscription = await returnTextFromAudioBuffer(currentAudioBuffer, sessionId, true);
-          } catch (e) {
-            logger.warn("Error in getting final transcription ", e);
-          }
-          currentAudioBuffer = Buffer.from([]);
-
-          ws.send(
-            JSON.stringify({
-              error: "",
-              transcript: finalTranscription,
-              transcriptDone: true,
-            }),
-          );
-        }
-      }, MAX_INACTIVITY_TIME);
+      // No inactivity timer needed: Deepgram's UtteranceEnd event (utterance_end_ms: 1000)
+      // handles end-of-speech detection and fires the transcriptDone: true message.
     });
 
     ws.on("close", () => {
       logger.info("Client disconnected.");
+      whisperTranscriber.close();
     });
 
     ws.on("error", (error: Error) => {

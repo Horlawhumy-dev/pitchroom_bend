@@ -1,16 +1,16 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import configs from "../config";
 import logger from "../utils/logger";
 import getSystemPrompt from "../utils/getPromptType";
 
-class AnthropicClient {
-  private client: Anthropic;
+class GeminiClient {
+  private client: GoogleGenAI;
 
   constructor() {
-    this.client = new Anthropic({
-      apiKey: configs.ANTHROPIC_API_KEY as string,
+    this.client = new GoogleGenAI({
+      apiKey: configs.GEMINI_API_KEY as string,
     });
-    logger.info("Anthropic client initialized.");
+    logger.info("Gemini client initialized.");
   }
 
   public isConnected(): boolean {
@@ -30,34 +30,28 @@ class AnthropicClient {
     let fullText = "";
 
     try {
-      const stream = this.client.messages.stream({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 1024,
-        system: systemPrompt,
-        temperature: 0.5,
-        messages: [{ role: "user", content: userQuestion }],
+      const responseStream = await this.client.models.generateContentStream({
+        model: "gemini-3-flash-preview",
+        contents: userQuestion,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.5,
+          maxOutputTokens: 1024,
+        },
       });
 
-      for await (const event of stream) {
-        if (
-          event.type === "content_block_delta" &&
-          event.delta.type === "text_delta"
-        ) {
-          const delta = event.delta.text;
-          fullText += delta;
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          fullText += chunk.text;
           onStream({
             message: "Streaming response...",
-            answer: delta,
+            answer: chunk.text,
             error: "",
           });
         }
       }
 
-      const finalMessage = await stream.finalMessage();
-      logger.info("Anthropic response done:", {
-        inputTokens: finalMessage.usage.input_tokens,
-        outputTokens: finalMessage.usage.output_tokens,
-      });
+      logger.info("Gemini response done.");
 
       onStream({
         message: "Final Response received",
@@ -66,7 +60,7 @@ class AnthropicClient {
       });
       return fullText;
     } catch (error: any) {
-      logger.error("Anthropic streaming error:", error.message);
+      logger.error("Gemini streaming error:", error.message);
       onStream({
         message: "Error occurred",
         answer: "",
@@ -96,15 +90,16 @@ Requirement: Address them as "founder". Be humanly and direct. Don't use placeho
 `;
 
     try {
-      const response = await this.client.messages.create({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 50,
-        messages: [{ role: "user", content: prompt }],
+      const response = await this.client.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          maxOutputTokens: 50,
+        },
       });
 
-      const messageContent = response.content[0];
-      if (messageContent && "text" in messageContent) {
-        return messageContent.text.trim();
+      if (response.text) {
+        return response.text.trim();
       }
       return "Welcome, founder. I'm ready to hear your pitch.";
     } catch (error: any) {
@@ -114,4 +109,4 @@ Requirement: Address them as "founder". Be humanly and direct. Don't use placeho
   }
 }
 
-export default AnthropicClient;
+export default GeminiClient;

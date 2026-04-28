@@ -113,8 +113,8 @@ router.post(
       try {
         deckPath = await uploadDeckToS3(deckFile, sessionId);
       } catch (error: any) {
-        logger.error("Error uploading deck to S3:", error.message);
-        handleError(res, "An error occurred while uploading the pitch deck.", null, 500);
+        logger.error("Error uploading deck locally:", error.message);
+        handleError(res, "An error occurred while uploading the pitch deck locally.", null, 500);
         return;
       }
 

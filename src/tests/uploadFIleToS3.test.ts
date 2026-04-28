@@ -1,17 +1,14 @@
 import { uploadResumeToS3 } from "../utils/s3";
 import Logger from "../utils/logger";
 import configs from "../config";
-import { awsBucket } from "../config/aws";
+import fs from "fs-extra";
+import path from "path";
 
 jest.mock("../utils/logger");
 jest.mock("../config");
-jest.mock("../config/aws", () => ({
-  awsBucket: {
-    upload: jest.fn(),
-  },
-}));
+jest.mock("fs-extra");
 
-describe("uploadResumeToS3", () => {
+describe("uploadResumeToS3 (Local)", () => {
   const mockSessionId = "testSession123";
   const mockFile = {
     originalname: "resume.pdf",
@@ -21,30 +18,27 @@ describe("uploadResumeToS3", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (configs.S3_BUCKET_NAME as string) = "mock-bucket-name";
+    (configs.UPLOADS_DIR as string) = "uploads";
+    (configs.SERVER_URL as string) = "http://localhost:3000";
   });
 
-  it("should upload a file to S3 and return the file URL", async () => {
-    const mockS3Response = {
-      Location:
-        "https://mock-bucket-name.s3.amazonaws.com/pitch-simulator/testSession123_resume.pdf",
-    };
-    (awsBucket.upload as jest.Mock).mockReturnValue({
-      promise: jest.fn().mockResolvedValue(mockS3Response),
-    });
+  it("should upload a file locally and return the file URL", async () => {
+    const expectedFileName = `${mockSessionId}_${mockFile.originalname}`;
+    const expectedFilePath = path.join("uploads", expectedFileName);
+    const expectedUrl = `http://localhost:3000/uploads/${expectedFileName}`;
+
+    (fs.ensureDir as jest.Mock).mockResolvedValue(undefined);
+    // (fs.writeFile as jest.Mock).mockResolvedValue(undefined);
 
     const result = await uploadResumeToS3(mockFile, mockSessionId);
 
-    expect(result).toBe(mockS3Response.Location);
-    expect(awsBucket.upload).toHaveBeenCalledWith({
-      Bucket: configs.S3_BUCKET_NAME,
-      Key: `pitch-simulator/${mockSessionId}_${mockFile.originalname}`,
-      Body: mockFile.buffer,
-      ContentType: mockFile.mimetype,
-    });
+    expect(result).toBe(expectedUrl);
+    expect(fs.ensureDir).toHaveBeenCalledWith("uploads");
+    expect(fs.writeFile).toHaveBeenCalledWith(expectedFilePath, mockFile.buffer);
+
     expect(Logger.info).toHaveBeenCalledWith(
-      "Uploading file to S3 with key:",
-      `pitch-simulator/${mockSessionId}_${mockFile.originalname}`,
+      "Uploading file locally to:",
+      expectedFilePath,
     );
     expect(Logger.info).toHaveBeenCalledWith(
       "File uploaded successfully for user: ",
@@ -64,23 +58,14 @@ describe("uploadResumeToS3", () => {
     );
   });
 
-  it("should throw an error if the S3 bucket name is missing", async () => {
-    (configs.S3_BUCKET_NAME as string | undefined) = undefined;
-    await expect(uploadResumeToS3(mockFile, mockSessionId)).rejects.toThrow(
-      "S3 bucket name is not defined in configs.",
-    );
-  });
-
-  it("should throw an error if S3 upload fails", async () => {
-    (awsBucket.upload as jest.Mock).mockReturnValue({
-      promise: jest.fn().mockRejectedValue(new Error("S3 upload failed")),
-    });
+  it("should throw an error if local upload fails", async () => {
+    (fs.ensureDir as jest.Mock).mockRejectedValue(new Error("File system error"));
 
     await expect(uploadResumeToS3(mockFile, mockSessionId)).rejects.toThrow(
-      "Failed to upload pitch deck file to bucket.",
+      "Failed to upload pitch deck file locally.",
     );
     expect(Logger.error).toHaveBeenCalledWith(
-      "Error uploading to S3:",
+      "Error uploading file locally:",
       expect.any(Error),
     );
   });

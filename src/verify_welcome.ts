@@ -1,12 +1,12 @@
-import AnthropicClient from "./src/websocket/anthropic";
-import { generateTTS } from "./src/utils/tts";
+import GeminiClient from "./websocket/gemini";
+import { generateTTS } from "./utils/tts";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 async function testWelcomeLogic() {
   console.log("Testing Welcome Message Logic...");
-  const anthropic = new AnthropicClient();
+  const geminiClient = new GeminiClient();
   
   const dummySession = {
     pitchStage: "Series A",
@@ -14,7 +14,7 @@ async function testWelcomeLogic() {
     deckContent: "We are building an AI-powered logistics platform called LogiStream that optimizes shipping routes."
   };
 
-  const welcomeText = await anthropic.generateWelcomeMessage(dummySession);
+  const welcomeText = await geminiClient.generateWelcomeMessage(dummySession);
   console.log("Generated Welcome Text:", welcomeText);
 
   if (welcomeText.length > 0) {

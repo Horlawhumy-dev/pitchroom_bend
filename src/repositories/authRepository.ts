@@ -3,20 +3,20 @@ import { hashPassword, comparePassword, generateToken, setAuthCookies, clearAuth
 import { Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import Logger from "../utils/logger";
-import {
-  sendVerificationEmail,
-  sendResetPasswordEmail,
-} from "../utils/emailService";
+// import {
+//   sendVerificationEmail,
+//   sendResetPasswordEmail,
+// } from "../utils/emailService";
 import redisClient from "../config/redis";
 
-const PUBLIC_EMAIL_DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "icloud.com"];
+// const PUBLIC_EMAIL_DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com", "icloud.com"];
 const VERIFICATION_TOKEN_EXP = 24 * 60 * 60; // 24 hours in seconds
 
 export const register = async (fullName: string, workEmail: string, password: string) => {
   const domain = workEmail.split("@")[1];
-  if (PUBLIC_EMAIL_DOMAINS.includes(domain.toLowerCase())) {
-    throw new Error("Please use a work email address.");
-  }
+  // if (PUBLIC_EMAIL_DOMAINS.includes(domain.toLowerCase())) {
+  //   throw new Error("Please use a work email address.");
+  // }
 
   const existingUser = await User.findOne({ workEmail });
   if (existingUser) {
@@ -30,7 +30,7 @@ export const register = async (fullName: string, workEmail: string, password: st
     fullName,
     workEmail,
     password: hashedPassword,
-    isVerified: false,
+    isVerified: true,
   });
 
   await user.save();
@@ -44,9 +44,9 @@ export const register = async (fullName: string, workEmail: string, password: st
   }
 
   // Send verification email in the background without blocking the response
-  sendVerificationEmail(workEmail, verificationToken).catch((error: any) => {
-    Logger.error(`Background verification email failed for ${workEmail}: ${error.message}`);
-  });
+  // sendVerificationEmail(workEmail, verificationToken).catch((error: any) => {
+  //   Logger.error(`Background verification email failed for ${workEmail}: ${error.message}`);
+  // });
 
   Logger.info(`Registration successful for ${workEmail}. Verification token (cached): ${verificationToken}`);
 
@@ -139,9 +139,9 @@ export const forgotPassword = async (workEmail: string) => {
   }
 
   // Send reset password email in the background
-  sendResetPasswordEmail(workEmail, resetToken).catch((error: any) => {
-    Logger.error(`Background reset email failed for ${workEmail}: ${error.message}`);
-  });
+  // sendResetPasswordEmail(workEmail, resetToken).catch((error: any) => {
+  //   Logger.error(`Background reset email failed for ${workEmail}: ${error.message}`);
+  // });
 
   Logger.info(`Password reset initiated for ${workEmail}. Token: ${resetToken}`);
 
@@ -229,9 +229,9 @@ export const resendEmail = async (workEmail: string, type: "verification" | "res
     const redisKey = `verify:${token}`;
     await redisClient.setEx(redisKey, VERIFICATION_TOKEN_EXP, workEmail);
 
-    sendVerificationEmail(workEmail, token).catch((error: any) => {
-      Logger.error(`Resend verification email failed for ${workEmail}: ${error.message}`);
-    });
+    // sendVerificationEmail(workEmail, token).catch((error: any) => {
+    //   Logger.error(`Resend verification email failed for ${workEmail}: ${error.message}`);
+    // });
 
     Logger.info(`Verification email resent to ${workEmail}. Token: ${token}`);
     return { message: "A new verification link has been sent to your email." };
@@ -241,9 +241,9 @@ export const resendEmail = async (workEmail: string, type: "verification" | "res
 
     await redisClient.setEx(redisKey, RESET_TOKEN_EXP, workEmail);
 
-    sendResetPasswordEmail(workEmail, token).catch((error: any) => {
-      Logger.error(`Resend reset password email failed for ${workEmail}: ${error.message}`);
-    });
+    // sendResetPasswordEmail(workEmail, token).catch((error: any) => {
+    //   Logger.error(`Resend reset password email failed for ${workEmail}: ${error.message}`);
+    // });
 
     Logger.info(`Reset password email resent to ${workEmail}. Token: ${token}`);
     return { message: "A new password reset link has been sent to your email." };

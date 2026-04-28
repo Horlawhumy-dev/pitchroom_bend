@@ -1,90 +1,86 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 import configs from "../config";
 import Logger from "./logger";
 import { InsightAIResponseType } from "../utils/interface";
 
-const anthropic = new Anthropic({
-  apiKey: configs.ANTHROPIC_API_KEY as string,
+const ai = new GoogleGenAI({
+  apiKey: configs.GEMINI_API_KEY as string,
 });
 
-const pitchReportTool: Anthropic.Tool = {
-  name: "pitch_report",
-  description: "Generate a structured pitch intelligence report with scores and feedback.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      storyClarity: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
+const pitchReportSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    storyClarity: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
       },
-      marketCredibility: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
-      },
-      founderConfidence: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
-      },
-      competitiveAdvantage: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
-      },
-      businessModel: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
-      },
-      tractionEvidence: {
-        type: "object",
-        properties: {
-          score: { type: "number", description: "Score from 1 to 10" },
-          feedback: { type: "string" },
-        },
-        required: ["score", "feedback"],
-      },
-      investorRiskSignals: {
-        type: "array",
-        items: { type: "string" },
-        description: "List of investor risk signal red flags",
-      },
-      overallSummary: { type: "string" },
-      actionableSteps: {
-        type: "array",
-        items: { type: "string" },
-        description: "3-5 high-impact next steps for the founder",
-      },
+      required: ["score", "feedback"],
     },
-    required: [
-      "storyClarity",
-      "marketCredibility",
-      "founderConfidence",
-      "competitiveAdvantage",
-      "businessModel",
-      "tractionEvidence",
-      "investorRiskSignals",
-      "overallSummary",
-      "actionableSteps",
-    ],
+    marketCredibility: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
+      },
+      required: ["score", "feedback"],
+    },
+    founderConfidence: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
+      },
+      required: ["score", "feedback"],
+    },
+    competitiveAdvantage: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
+      },
+      required: ["score", "feedback"],
+    },
+    businessModel: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
+      },
+      required: ["score", "feedback"],
+    },
+    tractionEvidence: {
+      type: Type.OBJECT,
+      properties: {
+        score: { type: Type.NUMBER, description: "Score from 1 to 10" },
+        feedback: { type: Type.STRING },
+      },
+      required: ["score", "feedback"],
+    },
+    investorRiskSignals: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "List of investor risk signal red flags",
+    },
+    overallSummary: { type: Type.STRING },
+    actionableSteps: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: "3-5 high-impact next steps for the founder",
+    },
   },
+  required: [
+    "storyClarity",
+    "marketCredibility",
+    "founderConfidence",
+    "competitiveAdvantage",
+    "businessModel",
+    "tractionEvidence",
+    "investorRiskSignals",
+    "overallSummary",
+    "actionableSteps",
+  ],
 };
 
 export async function generatePitchIntelligenceFromAI(
@@ -132,33 +128,34 @@ You are a lead partner at a top-tier VC firm (e.g., Sequoia, Andreessen Horowitz
 - ACTIONABLE STEPS: Provide exactly 3-5 concrete things the founder should do or change before their next real pitch.
 `;
 
-  const response = await anthropic.messages.create({
-    model: "claude-3-5-sonnet-20240620",
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [
-      { 
-        role: "user", 
-        content: `Session ID: ${sessionId}\nPitch Stage: ${pitchStage}\n\nTRANSCRIPT:\n${formattedTranscript}` 
-      }
-    ],
-    tools: [pitchReportTool],
-    tool_choice: { type: "tool", name: "pitch_report" },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Session ID: ${sessionId}\nPitch Stage: ${pitchStage}\n\nTRANSCRIPT:\n${formattedTranscript}`,
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 4096,
+        responseMimeType: "application/json",
+        responseSchema: pitchReportSchema,
+      },
+    });
 
-  const toolUseBlock = response.content.find(
-    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
-  );
+    if (!response.text) {
+      Logger.error(`Empty response from Gemini for session ${sessionId}`);
+      return null;
+    }
 
-  if (!toolUseBlock) {
-    Logger.error(`No tool use block in Anthropic response for session ${sessionId}`);
+    const structuredData = JSON.parse(response.text) as InsightAIResponseType;
+    
+    Logger.info(
+      `AI Pitch Intelligence response for ${sessionId}:`,
+      structuredData,
+    );
+
+    return structuredData;
+  } catch (error: any) {
+    Logger.error(`Failed to generate pitch intelligence for session ${sessionId}:`, error);
     return null;
   }
-
-  Logger.info(
-    `AI Pitch Intelligence response for ${sessionId}:`,
-    toolUseBlock.input,
-  );
-
-  return toolUseBlock.input as InsightAIResponseType;
 }
+

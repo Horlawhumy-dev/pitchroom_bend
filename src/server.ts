@@ -48,6 +48,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Serve static files from the uploads directory
+app.use("/uploads", express.static(configs.UPLOADS_DIR));
+
 // Redirect /docs to /pitch-simulator/docs
 app.get("/docs", (req, res) => {
   res.redirect("/pitch-simulator/docs");
